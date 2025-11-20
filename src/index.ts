@@ -6,6 +6,7 @@
 import { AutotaskMcpServer } from './mcp/server.js';
 import { Logger } from './utils/logger.js';
 import { loadEnvironmentConfig, mergeWithMcpConfig } from './utils/config.js';
+import { createHttpServer } from './http/server.js';
 
 async function main() {
   let logger: Logger | undefined;
@@ -17,37 +18,60 @@ async function main() {
 
     // Initialize logger
     logger = new Logger(envConfig.logging.level, envConfig.logging.format);
-    logger.info('Starting Autotask MCP Server...');
-    logger.debug('Configuration loaded', { 
-      serverName: mcpConfig.name, 
+    logger.info('Starting Autotask MCP Server (Streamable HTTP)...');
+    logger.debug('Configuration loaded', {
+      serverName: mcpConfig.name,
       serverVersion: mcpConfig.version,
-      hasCredentials: !!(mcpConfig.autotask.username && mcpConfig.autotask.secret && mcpConfig.autotask.integrationCode)
+      hasCredentials: !!(
+        mcpConfig.autotask.username &&
+        mcpConfig.autotask.secret &&
+        mcpConfig.autotask.integrationCode
+      ),
     });
 
     // Validate required configuration
-    if (!mcpConfig.autotask.username || !mcpConfig.autotask.secret || !mcpConfig.autotask.integrationCode) {
-      throw new Error('Missing required Autotask credentials. Please set AUTOTASK_USERNAME, AUTOTASK_SECRET, and AUTOTASK_INTEGRATION_CODE environment variables.');
+    if (
+      !mcpConfig.autotask.username ||
+      !mcpConfig.autotask.secret ||
+      !mcpConfig.autotask.integrationCode
+    ) {
+      throw new Error(
+        'Missing required Autotask credentials.\n' +
+          'Please set AUTOTASK_USERNAME, AUTOTASK_SECRET, and AUTOTASK_INTEGRATION_CODE environment variables.',
+      );
     }
 
-    // Create the MCP server (don't initialize Autotask yet)
+    // Create the MCP server (handlers + Autotask integration)
     const server = new AutotaskMcpServer(mcpConfig, logger);
 
-    // Set up graceful shutdown
+    // Build the HTTP app around the MCP server
+    const mcpCoreServer = server.getServer();
+    const app = createHttpServer(mcpCoreServer, logger);
+
+    // Choose port/host (you can change defaults as you like)
+    const port = Number(process.env.PORT ?? 3000);
+    const host = process.env.HOST ?? '0.0.0.0';
+
+    const httpServer = app.listen(port, host, () => {
+      logger!.info(
+        `Autotask MCP Streamable HTTP server listening on http://${host}:${port}/mcp`,
+      );
+    });
+
+    // Graceful shutdown
     process.on('SIGINT', async () => {
       logger!.info('Received SIGINT, shutting down gracefully...');
+      httpServer.close();
       await server.stop();
       process.exit(0);
     });
 
     process.on('SIGTERM', async () => {
       logger!.info('Received SIGTERM, shutting down gracefully...');
+      httpServer.close();
       await server.stop();
       process.exit(0);
     });
-
-    // Start the server
-    await server.start();
-
   } catch (error) {
     if (logger) {
       logger.error('Failed to start Autotask MCP Server:', error);

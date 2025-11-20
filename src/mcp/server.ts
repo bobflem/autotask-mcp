@@ -27,7 +27,7 @@ export class AutotaskMcpServer {
 
   constructor(config: McpServerConfig, logger: Logger) {
     this.logger = logger;
-    
+
     // Initialize the MCP server
     this.server = new Server(
       {
@@ -56,6 +56,10 @@ export class AutotaskMcpServer {
     this.toolHandler = new EnhancedAutotaskToolHandler(this.autotaskService, logger);
 
     this.setupHandlers();
+  }
+
+  public getServer(): Server {
+    return this.server;
   }
 
   /**
